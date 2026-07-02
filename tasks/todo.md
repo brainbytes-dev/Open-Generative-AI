@@ -28,7 +28,10 @@ Branch: `fix/multi-provider-adapters`
 - [x] Browser-Test: Provider-Tabs, Gate, Settings, Image+Video-Katalog-Switch — alles fehlerfrei
 - [x] Echter POST an queue.fal.run bestätigt (403 "Exhausted balance" — Pipeline korrekt, User-Guthaben leer)
 - [x] Bug gefunden+gefixt: VideoStudio ModelDropdown war Modul-Level-Funktion, referenzierte alte Top-Level-Imports → jetzt Props
-- [ ] Echte Bildgenerierung sehen (wartet auf fal.ai-Balance-Topup)
+- [x] Echte Bildgenerierung gesehen — Bug gefunden+gefixt: Poll-URL wurde aus der Modell-ID rekonstruiert
+      (`{falId}/requests/{id}/status`), aber fal gruppiert Requests unter der Basis-App-ID und droppt
+      Suffixe wie `/v1.1` im Queue-Pfad → 405. Fix: fals eigene `status_url`/`response_url` aus der
+      Submit-Antwort folgen statt selbst rekonstruieren. End-to-end verifiziert: echtes 236KB JPEG erzeugt.
 
 ## P2b — Voller fal.ai-Katalog via Live-Discovery ✅ (Henrik-Wunsch 2026-07-02: "alle Modelle die da sind")
 - [x] `providers/fal-discovery.js`: fal Platform API (`/v1/models?category=X`, verifiziert live per curl mit echtem Key)
@@ -49,6 +52,23 @@ Branch: `fix/multi-provider-adapters`
 - Bekannte Grenze: dynamisch geladene Modelle zeigen nur Prompt+Generate (kein Aspect-Ratio/Resolution-Picker,
   da UI dafür Studio-spezifische Buttons bräuchte) — kuratierte Modelle behalten die volle UI
 
+## P2c — Pending-Generation-Recovery ✅ (Henrik-Bugreport 2026-07-02: "video fertig aber nicht angezeigt", "$6 verbraten")
+Root Cause: Polling war rein In-Memory (Client-Loop im Component-Lifecycle) — Tab-Wechsel/Reload während
+der Generierung verlor den Faden client-seitig, obwohl fal server-seitig weiterrechnete UND abrechnete.
+- [x] `providers/pending-tracker.js`: localStorage-Tracker, `trackPending`/`untrackPending`/`getPending`/
+      `subscribePending`, 30min-Max-Age gegen ewig hängende Einträge
+- [x] `fal.js`: `submitAndPoll` trackt sofort nach Submit (bevor Poll startet), untrackt bei Erfolg/Fehler;
+      neues `resumePending(entry, apiKey)` hängt sich an bestehende request_id ohne Neu-Submit
+- [x] ImageStudio/VideoStudio: Resume-Effect beim Mount, holt offene fal-Generierungen automatisch nach,
+      zeigt sie in History/Canvas — kein Klick nötig
+- [x] Kostenlos verifiziert: fake-pending-Eintrag auf bereits abgeschlossenen echten Request injiziert,
+      neu geladen, Bild kam automatisch in die History, Pending-Eintrag danach sauber weg
+- Bekannte Grenze: gilt nur für fal (Muapi hat denselben In-Memory-Only-Pattern in muapi.js, aber das war
+  nicht Teil des Bugreports — separater Task falls gewünscht)
+- **Henriks Kosten-Hinweis:** Live-Tests in dieser Session (Playwright, mehrere Bild/Video-Generierungen)
+  haben echtes fal-Guthaben verbraucht (~$6 gemeldet). Ab jetzt: keine echten Submit-Calls mehr ohne
+  explizites Go — nur noch kostenlose Metadaten-Abfragen (Modell-Listen, Status bereits abgeschlossener Jobs).
+
 ## P3 — apifree.ai-Adapter — ZURÜCKGESTELLT (Henrik-Entscheidung 2026-07-02)
 Registry/Architektur bleibt so gebaut, dass apifree (oder jeder weitere Provider) später ein
 reiner Daten-Eintrag ist (providers/apifree.js + models.apifree.js + Proxy-Route nach demselben
@@ -68,23 +88,43 @@ Muster wie fal). Kein Code dafür in diesem Durchgang.
 - [ ] Agent Studio (Muapi-gated, dokumentieren)
 - [ ] Design Agent / Apps / MCP-CLI Studio (Muapi-gated, dokumentieren)
 
-## P5 — Deploy auf Coolify — ZURÜCKGESTELLT (2026-07-02, Coolify-Queue kaputt)
-- [x] App in Coolify angelegt (uuid `zctyl2in9mo3nc1s6tzletnj`, Dockerfile Build-Pack, Port 3000, Public-Repo — kein Deploy-Key nötig)
-- [x] 3× Deploy getriggert — Docker-Build lief jedes Mal sauber durch (Next.js "Ready in 308ms" im Container-Log
-      bestätigt), aber der Container-Swap-Schritt ("Removing old containers") hängt danach permanent
-- [x] Diagnose: NICHT unser Code — auch `POST .../cancel` und `DELETE .../applications/...` hängen identisch.
-      Systemisches Problem mit Coolifys Queue-Worker (Horizon) auf diesem Host, nicht app-spezifisch.
-- [ ] Henrik checkt die Maschine direkt (Coolify-Dashboard, `docker ps`, Horizon-Worker-Container neustarten)
-- [ ] Danach: Deploy erneut triggern (`POST /deploy?uuid=zctyl2in9mo3nc1s6tzletnj&force=true`), Nice-Domain in
-      Coolify-UI setzen (`http://open-generative-ai.local.brainbyt.es:3000`), NPM Proxy-Host anlegen
-- Übergangsweise: `git clone --recurse-submodules` + `npm run setup && npm run build && npm start` lokal/auf
-  jeder anderen Docker-fähigen Maschine funktioniert nachweislich (mehrfach in dieser Session verifiziert)
+## P5 — Deploy auf Coolify ✅ (App läuft, NPM-Domain macht Henrik selbst)
+- [x] Erste App (`zctyl2in9mo3nc1s6tzletnj`, Projekt brainbytes-studio-stack) hing 3× beim Container-Swap —
+      Diagnose: Coolify-Queue-Worker war nur extrem verstopft/langsam, nicht kaputt (Deploy/Cancel/Delete
+      liefen alle irgendwann doch noch durch, nur mit vielen Minuten Verzögerung)
+- [x] App gelöscht, neu angelegt in **Projekt "Internal Apps"** (uuid `tdk9cmhqa74cqwssn6s6g9jt`, passender
+      Ort für Henriks Idee, da schon vorhanden) — neue App-uuid `gtdfuv7qo2tcwzxhi0i5dre8`
+- [x] Deploy erfolgreich: "Rolling update completed", Next.js läuft im Container ("Ready in 414ms")
+- [x] Auto-Domain: `http://gtdfuv7qo2tcwzxhi0i5dre8.46.126.19.101.sslip.io` (nur über NPM erreichbar, nicht
+      direkt von aussen — kein offener Port-Forward auf die public IP für Traefik)
+- [ ] **Henrik legt NPM-Proxy-Host selbst an** (UI, nicht ich):
+      Domain `open-generative-ai.local.brainbyt.es` → `192.168.10.32:80`, Websockets ON, SSL Wildcard,
+      Advanced Config: `proxy_set_header Host gtdfuv7qo2tcwzxhi0i5dre8.46.126.19.101.sslip.io;`
+      (Host-Override nötig, da keine Coolify-UI-Domain gesetzt ist — API kann das laut Runbook nicht selbst)
+- 3. Deploy-Versuch (uuid `gtdfuv7qo2tcwzxhi0i5dre8`) hing wieder identisch bei "Removing old containers" —
+  jetzt reproduzierbar 2 von 3 Versuchen. Verdacht: Docker-in-LXC cgroup2-Swap-Accounting-Warnung
+  ("kernel does not support memory swappiness... cgroup is not mounted") in jedem Log, evtl. Ursache für
+  die hängenden Container-Lifecycle-Ops. Braucht Henriks direkten SSH-Zugriff auf die Proxmox-LXC.
+- **Entscheidung 2026-07-02: Coolify vorerst ad acta, App läuft lokal** (`npm run build && npm start -- -p 3000`
+  im Repo-Root) — stabil, mehrfach verifiziert, kein Infra-Risiko. Coolify-Deploy ist ein späterer Task,
+  sobald die LXC-Flakiness geklärt ist (siehe GPU-Passthrough-Abschnitt oben — dieselbe Proxmox-LXC).
 
 ## Später — Lokale GPU als Provider (Henrik-Idee 2026-07-02)
-Henrik hat lokal eine GPU. Web-App-Local-Inference gibt's im Upstream nicht (nur Electron-Desktop,
-sd.cpp/Wan2GP). Möglicher 4. Provider: eigener Wan2GP/ComfyUI-Server auf Henriks Maschine, von der
-Web-App per URL angesprochen (Registry ist schon so gebaut, dass ein weiterer Provider ein Daten-
-Eintrag + Adapter ist). Separater Task, nicht Teil dieses Durchgangs.
+Henrik hat einen separaten Windows/Linux-PC mit NVIDIA-GPU. Web-App-Local-Inference gibt's im Upstream
+nicht (nur Electron-Desktop, sd.cpp/Wan2GP). Möglicher 4. Provider: eigener Wan2GP/ComfyUI-Server auf
+Henriks NVIDIA-Maschine, von der Web-App per URL angesprochen (Registry ist schon so gebaut, dass ein
+weiterer Provider ein Daten-Eintrag + Adapter ist). Separater Task, nicht Teil dieses Durchgangs.
+
+### Kandidat: Duix-Avatar (github.com/duixcom/Duix-Avatar) für Lip Sync Studio
+13.7k⭐, offline Digital-Human/Avatar-Toolkit (Text/Audio → Talking-Head-Video) — passt fachlich zum
+bestehenden Lip Sync Studio. Voraussetzungen für einen Adapter:
+1. NVIDIA-only (RTX 4070+, 32GB RAM, 100GB Platz, Windows/Ubuntu 22.04) — Henrik hat die Hardware.
+2. Docker-Compose mit 3 GPU-Services: `fish-speech-ziming` (TTS, Port 18180), `fun-asr` (ASR, Port 10095),
+   `duix.avatar` (Video-Gen, Port 8383) — muss zuerst auf Henriks NVIDIA-PC laufen, bevor ein Adapter Sinn macht.
+3. **Keine öffentliche API-Doku** (nur eine chinesische FAQ im `doc/`-Ordner) — die REST-API vom
+   `duix.avatar`-Service müsste aus dem Electron-App-Quellcode (`src/`) reverse-engineered werden,
+   nicht aus sauberer Doku wie bei fal.ai. Das ist der Hauptaufwand, nicht die Adapter-Architektur selbst.
+Reihenfolge: erst Duix-Avatar standalone auf dem NVIDIA-PC zum Laufen bringen, dann API reversen, dann Adapter.
 
 ## Nicht im Scope (v1)
 - Next.js 16 Upgrade (bewusst verschoben, separater Task — middleware.js→proxy.js Konflikt mit Proxy-Design)
