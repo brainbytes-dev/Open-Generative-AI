@@ -29,8 +29,18 @@ function authHeaders(apiKey) {
   return { "Content-Type": "application/json", "x-fal-key": apiKey };
 }
 
-async function pollForResult(falModelId, requestId, apiKey, maxAttempts = 900, interval = 2000) {
-  const statusUrl = `${BASE_URL}/${falModelId}/requests/${requestId}/status`;
+// fal's queue paths for status/result are NOT always "{submitPath}/requests/{id}/...".
+// For grouped apps (e.g. submit to "fal-ai/flux-pro/v1.1", but poll under
+// "fal-ai/flux-pro/requests/{id}/status" — no "/v1.1") the queue path drops
+// trailing segments. Confirmed by testing live: the submit response's own
+// status_url/response_url are the only reliable source for these paths, so
+// this always follows them (routed back through our proxy for CORS) instead
+// of reconstructing a path from falModelId.
+function proxyPathFromFalUrl(falUrl) {
+  return `${BASE_URL}${new URL(falUrl).pathname}`;
+}
+
+async function pollForResult(statusUrl, apiKey, maxAttempts = 900, interval = 2000) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, interval));
     let res;
@@ -47,9 +57,8 @@ async function pollForResult(falModelId, requestId, apiKey, maxAttempts = 900, i
     }
     const data = await res.json();
     if (data.status === "COMPLETED") {
-      const resultRes = await fetch(`${BASE_URL}/${falModelId}/requests/${requestId}`, {
-        headers: authHeaders(apiKey),
-      });
+      const resultUrl = data.response_url ? proxyPathFromFalUrl(data.response_url) : `${statusUrl.replace(/\/status$/, "")}`;
+      const resultRes = await fetch(resultUrl, { headers: authHeaders(apiKey) });
       if (!resultRes.ok) {
         const errText = await resultRes.text();
         throw new Error(`fal result fetch failed: ${resultRes.status} - ${errText.slice(0, 100)}`);
@@ -79,7 +88,10 @@ async function submitAndPoll(falModelId, payload, apiKey, onRequestId, maxAttemp
   const requestId = submitData.request_id;
   if (!requestId) return submitData;
   if (onRequestId) onRequestId(requestId);
-  const result = await pollForResult(falModelId, requestId, apiKey, maxAttempts);
+  const statusUrl = submitData.status_url
+    ? proxyPathFromFalUrl(submitData.status_url)
+    : `${BASE_URL}/${falModelId}/requests/${requestId}/status`;
+  const result = await pollForResult(statusUrl, apiKey, maxAttempts);
   const outputUrl =
     result.images?.[0]?.url || result.video?.url || result.image?.url || result.audio?.url || result.video_url;
   return { ...result, url: outputUrl };
