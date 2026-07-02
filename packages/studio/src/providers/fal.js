@@ -144,7 +144,9 @@ export async function generateI2I(apiKey, params) {
     apiKey,
   );
   return submitAndPoll(modelInfo.falId, payload, apiKey, params.onRequestId, 60, {
-    kind: "image",
+    // Callers can override (e.g. "character-shot") so a reload during a batch
+    // resumes into the studio that started it, not generically into Image Studio.
+    kind: params.kind || "image",
     modelName: modelInfo.name,
     prompt: params.prompt,
   });

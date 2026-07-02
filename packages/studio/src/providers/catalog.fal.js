@@ -138,6 +138,36 @@ const CURATED_I2I = [
       };
     },
   },
+  {
+    // Discovery lists this as "openai/gpt-image-2/edit" but the real submit
+    // path is "fal-ai/gpt-image-2/edit" — same grouped-app naming quirk as
+    // the v1.1 poll-path bug (see fal.js), confirmed via schema fetch.
+    id: "fal-nano-banana-2-edit",
+    name: "Nano Banana 2 Edit",
+    falId: "fal-ai/nano-banana-2/edit",
+    imageField: "image_url",
+    buildPayload(params) {
+      return {
+        prompt: params.prompt || "",
+        image_urls: [params.image_url],
+        resolution: "1K",
+      };
+    },
+  },
+  {
+    id: "fal-gpt-image-2-edit",
+    name: "GPT Image 2 Edit",
+    falId: "fal-ai/gpt-image-2/edit",
+    imageField: "image_url",
+    buildPayload(params) {
+      return {
+        prompt: params.prompt || "",
+        image_urls: [params.image_url],
+        quality: "high",
+        output_format: "png",
+      };
+    },
+  },
 ];
 
 // ─── Text-to-Video (curated) ────────────────────────────────────────────────
@@ -320,8 +350,14 @@ export function getResolutionsForI2IModel() {
 export function getQualityFieldForI2IModel() {
   return null;
 }
-export function getMaxImagesForI2IModel() {
-  return 1; // curated fal i2i entries take a single reference image
+export function getMaxImagesForI2IModel(id) {
+  // Curated entries are hand-tuned for a single reference image. Dynamic
+  // (live-discovered) entries don't have their schema fetched yet at
+  // selection time, so we can't know the model's real image_urls cap
+  // synchronously — allow a generous upload set and let buildGenericPayload()
+  // drop the field entirely for models whose schema turns out to be
+  // single-image-only (image_url, not image_urls).
+  return getI2IModelById(id)?.dynamic ? 6 : 1;
 }
 export function getEffectsForI2IModel() {
   return [];

@@ -109,9 +109,15 @@ export function buildGenericPayload(inputSchema, params) {
   const props = inputSchema?.properties || {};
   const payload = {};
   if (props.prompt !== undefined && params.prompt !== undefined) payload.prompt = params.prompt;
-  if (params.image_url) {
-    if (props.image_url !== undefined) payload.image_url = params.image_url;
-    else if (props.image_urls !== undefined) payload.image_urls = [params.image_url];
+  const imageUrls =
+    Array.isArray(params.images_list) && params.images_list.length > 0
+      ? params.images_list
+      : params.image_url
+        ? [params.image_url]
+        : [];
+  if (imageUrls.length > 0) {
+    if (props.image_urls !== undefined) payload.image_urls = imageUrls;
+    else if (props.image_url !== undefined) payload.image_url = imageUrls[0];
   }
   if (props.aspect_ratio !== undefined && params.aspect_ratio) {
     payload.aspect_ratio = params.aspect_ratio;

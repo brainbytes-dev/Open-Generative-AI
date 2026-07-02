@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic';
 import {
   ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio,
   CinemaStudio, AudioStudio, MarketingStudio, WorkflowStudio, AgentStudio, AppsStudio,
+  CharacterShotsStudio,
   getUserBalance, PROVIDERS, DEFAULT_PROVIDER_ID, getActiveProviderId, setActiveProviderId,
   getProviderConfig, getStoredKey, setStoredKey, hasAnyKey,
 } from 'studio';
@@ -20,6 +21,7 @@ import ApiKeyModal from './ApiKeyModal';
 const TABS = [
   { id: 'image',   label: 'Image Studio' },
   { id: 'video',   label: 'Video Studio' },
+  { id: 'character-shots', label: 'Character Shots' },
   { id: 'audio',   label: 'Audio Studio' },
   { id: 'clipping', label: 'AI Clipping' },
   { id: 'vibe-motion', label: 'Vibe Motion' },
@@ -178,15 +180,28 @@ export default function StandaloneShell() {
 
   const handleKeySave = useCallback((key, providerId) => {
     const id = providerId || DEFAULT_PROVIDER_ID;
+    // Only switch the ACTIVE generation provider when this is either the very
+    // first key ever entered (the onboarding gate — has to become active,
+    // nothing else makes sense) or the user is updating the key for the
+    // provider that's already active. Adding a key for a *different*
+    // provider from Settings (e.g. adding Muapi just to unlock Workflows
+    // while fal stays the generation provider) must NOT silently switch —
+    // that's what the explicit "Use this" button (handleProviderSwitch) is
+    // for. Otherwise generation calls silently start hitting the wrong
+    // provider's (possibly empty) balance.
+    const isFirstKeyEver = Object.keys(keys).length === 0;
+    const shouldActivate = isFirstKeyEver || id === activeProviderId;
     setStoredKey(id, key);
-    setActiveProviderId(id);
-    setActiveProviderIdState(id);
+    if (shouldActivate) {
+      setActiveProviderId(id);
+      setActiveProviderIdState(id);
+    }
     setKeys((prev) => ({ ...prev, [id]: key }));
     if (id === 'muapi') {
       fetchBalance(key);
       document.cookie = `muapi_key=${key}; path=/; max-age=31536000; SameSite=Lax`;
     }
-  }, [fetchBalance]);
+  }, [fetchBalance, keys, activeProviderId]);
 
   const handleKeyRemove = useCallback((providerId) => {
     setStoredKey(providerId, null);
@@ -397,6 +412,7 @@ export default function StandaloneShell() {
       <div className="flex-1 min-h-0 relative overflow-hidden">
         {activeTab === 'image'   && <ImageStudio   key={activeProviderId} apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} />}
         {activeTab === 'video'   && <VideoStudio   key={activeProviderId} apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} />}
+        {activeTab === 'character-shots' && <CharacterShotsStudio apiKey={apiKey} />}
         {activeTab === 'clipping' && <ClippingStudio apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} />}
         {activeTab === 'vibe-motion' && <VibeMotionStudio apiKey={apiKey} />}
         {activeTab === 'lipsync' && <LipSyncStudio apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} />}

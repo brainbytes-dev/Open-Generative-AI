@@ -3,6 +3,13 @@
 Plan: `/Users/henrik/.claude/plans/fizzy-churning-lollipop.md`
 Branch: `fix/multi-provider-adapters`
 
+## P3 — Character Shots Studio (neues Feature, 2026-07-03)
+- [ ] 2 kuratierte I2I-Katalog-Einträge in catalog.fal.js: nano-banana-2/edit, gpt-image-2/edit
+- [ ] fal.js: generateI2I bekommt optionalen params.kind (default "image"), durchgereicht an trackPending
+- [ ] Neue Komponente CharacterShotsStudio.jsx: Upload, Modell-Wahl, 9 feste Winkel-Presets, Grid, Resume-Effect
+- [ ] StandaloneShell.js: neuer Tab "Character Shots"
+- [ ] Build-Check, dann Browser-Test (echter Cost, vorher fragen)
+
 ## P0 — Fork + Tracking ✅
 - [x] Fork nach brainbytes-dev/Open-Generative-AI
 - [x] Clone mit Submodulen
