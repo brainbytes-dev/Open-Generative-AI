@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { processRecast, uploadFile } from "../muapi.js";
+import { processRecast, uploadFile } from "../client.js";
 import {
   recastModels,
   getRecastModelById,

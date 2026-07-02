@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { generateImage, uploadFile } from "../muapi.js";
+import { generateImage, uploadFile } from "../client.js";
 
 // ─── Constants (inlined from promptUtils) ───────────────────────────────────
 

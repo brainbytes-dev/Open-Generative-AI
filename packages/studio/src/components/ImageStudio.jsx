@@ -1,21 +1,9 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { generateImage, generateI2I, uploadFile } from "../muapi.js";
-import {
-  t2iModels,
-  i2iModels,
-  getAspectRatiosForModel,
-  getResolutionsForModel,
-  getQualityFieldForModel,
-  getAspectRatiosForI2IModel,
-  getResolutionsForI2IModel,
-  getQualityFieldForI2IModel,
-  getMaxImagesForI2IModel,
-  getEffectsForI2IModel,
-  getDefaultEffectForI2IModel,
-  getI2IModelById,
-} from "../models.js";
+import { generateImage, generateI2I, uploadFile } from "../client.js";
+import { getModelLists } from "../providers/catalog.js";
+import { getActiveProviderId } from "../providers/registry.js";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -745,6 +733,24 @@ export default function ImageStudio({
   onFilesHandled,
 }) {
   const PERSIST_KEY = "hg_image_studio_persistent";
+
+  // Provider-aware model catalog. StandaloneShell remounts this component
+  // (via `key={activeProvider}`) on provider switch, so this is stable for
+  // the lifetime of a given mount and re-evaluates fresh on switch.
+  const {
+    t2iModels,
+    i2iModels,
+    getAspectRatiosForModel,
+    getResolutionsForModel,
+    getQualityFieldForModel,
+    getAspectRatiosForI2IModel,
+    getResolutionsForI2IModel,
+    getQualityFieldForI2IModel,
+    getMaxImagesForI2IModel,
+    getEffectsForI2IModel,
+    getDefaultEffectForI2IModel,
+    getI2IModelById,
+  } = getModelLists(getActiveProviderId());
 
   // ── Model / mode state ──────────────────────────────────────────────────
   const [imageMode, setImageMode] = useState(false); // false=t2i, true=i2i

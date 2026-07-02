@@ -3,7 +3,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, WorkflowStudio, AgentStudio, AppsStudio, getUserBalance } from 'studio';
+import {
+  ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio,
+  CinemaStudio, AudioStudio, MarketingStudio, WorkflowStudio, AgentStudio, AppsStudio,
+  getUserBalance, PROVIDERS, DEFAULT_PROVIDER_ID, getActiveProviderId, setActiveProviderId,
+  getProviderConfig, getStoredKey, setStoredKey, hasAnyKey,
+} from 'studio';
 
 const DesignAgentStudio = dynamic(() => import('studio').then(mod => mod.DesignAgentStudio), {
   ssr: false,
@@ -28,7 +33,8 @@ const TABS = [
   { id: 'apps', label: 'Explore Apps' },
 ];
 
-const STORAGE_KEY = 'muapi_key';
+// muapi_key is kept as its own localStorage/cookie name (registry.getStoredKey('muapi')
+// resolves to it) so existing Muapi-only users migrate with zero data loss.
 
 export default function StandaloneShell() {
   const params = useParams();
@@ -63,11 +69,21 @@ export default function StandaloneShell() {
     return 'image';
   };
   
-  const [apiKey, setApiKey] = useState(null);
+  // activeProviderId decides which backend Image/Video/Audio/LipSync/... generation
+  // calls hit (see packages/studio/src/client.js). `keys` holds one stored key per
+  // provider; `apiKey` below is whichever key belongs to the *active* provider.
+  const [activeProviderId, setActiveProviderIdState] = useState(DEFAULT_PROVIDER_ID);
+  const [keys, setKeys] = useState({});
+  const apiKey = keys[activeProviderId] || null;
+  // Workflows/Agents/Design Agent/Apps are Muapi-cloud features regardless of the
+  // active generation provider (see client.js) — they always need the Muapi key
+  // specifically, never the fal.ai (or future provider) key.
+  const muapiApiKey = keys.muapi || null;
   const [activeTab, setActiveTab] = useState(getInitialTab());
 
   const [balance, setBalance] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [keyModalProvider, setKeyModalProvider] = useState(null); // providerId being added/changed in Settings
   const [isHeaderVisible, setIsHeaderVisible] = useState(true);
   const [hasMounted, setHasMounted] = useState(false);
   const [showVadooBanner, setShowVadooBanner] = useState(() => {
@@ -138,36 +154,81 @@ export default function StandaloneShell() {
 
   useEffect(() => {
     setHasMounted(true);
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      setApiKey(stored);
-      fetchBalance(stored);
+    const loaded = {};
+    PROVIDERS.forEach((p) => {
+      const stored = getStoredKey(p.id);
+      if (stored) loaded[p.id] = stored;
+    });
+    setKeys(loaded);
+    let initialProvider = getActiveProviderId();
+    if (!loaded[initialProvider]) {
+      // Stored "active provider" has no key (e.g. a fal.ai-only user, or the
+      // active provider's key was removed elsewhere) — fall back to whichever
+      // provider does have a key instead of silently passing apiKey=null.
+      const fallback = PROVIDERS.find((p) => loaded[p.id]);
+      if (fallback) {
+        initialProvider = fallback.id;
+        setActiveProviderId(fallback.id);
+      }
+    }
+    setActiveProviderIdState(initialProvider);
+
+    if (loaded.muapi) {
+      fetchBalance(loaded.muapi);
       // Sync cookie immediately on mount to establish identity for background requests
-      document.cookie = `muapi_key=${stored}; path=/; max-age=31536000; SameSite=Lax`;
+      document.cookie = `muapi_key=${loaded.muapi}; path=/; max-age=31536000; SameSite=Lax`;
     }
   }, [fetchBalance]);
 
-  const handleKeySave = useCallback((key) => {
-    localStorage.setItem(STORAGE_KEY, key);
-    setApiKey(key);
-    fetchBalance(key);
-    document.cookie = `muapi_key=${key}; path=/; max-age=31536000; SameSite=Lax`;
+  const handleKeySave = useCallback((key, providerId) => {
+    const id = providerId || DEFAULT_PROVIDER_ID;
+    setStoredKey(id, key);
+    setActiveProviderId(id);
+    setActiveProviderIdState(id);
+    setKeys((prev) => ({ ...prev, [id]: key }));
+    if (id === 'muapi') {
+      fetchBalance(key);
+      document.cookie = `muapi_key=${key}; path=/; max-age=31536000; SameSite=Lax`;
+    }
   }, [fetchBalance]);
 
-  const handleKeyChange = useCallback(() => {
-    localStorage.removeItem(STORAGE_KEY);
-    setApiKey(null);
-    setBalance(null);
-    document.cookie = "muapi_key=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
-  }, []);
+  const handleKeyRemove = useCallback((providerId) => {
+    setStoredKey(providerId, null);
+    setKeys((prev) => {
+      const next = { ...prev };
+      delete next[providerId];
+      // If we just removed the active provider's key, fall back to any provider
+      // that still has a key, else the gate re-appears on next render.
+      if (providerId === activeProviderId) {
+        const fallback = PROVIDERS.find((p) => p.id !== providerId && next[p.id]);
+        if (fallback) {
+          setActiveProviderId(fallback.id);
+          setActiveProviderIdState(fallback.id);
+        }
+      }
+      return next;
+    });
+    if (providerId === 'muapi') {
+      setBalance(null);
+      document.cookie = "muapi_key=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+    }
+  }, [activeProviderId]);
 
-  // Inject API key into all outgoing Axios requests (prop-based approach)
-  // We use an interceptor to be selective and NOT send the key to external domains like S3
+  const handleProviderSwitch = useCallback((providerId) => {
+    if (!keys[providerId]) return; // can't switch to a provider with no key
+    setActiveProviderId(providerId);
+    setActiveProviderIdState(providerId);
+  }, [keys]);
+
+  // Inject the Muapi key into all outgoing Axios requests (prop-based approach).
+  // These proxied paths (/api/app, /api/workflow, /api/agents, /api/api, /api/v1)
+  // are Muapi-cloud endpoints regardless of which provider is active for
+  // generation — see client.js — so this always uses muapiApiKey, not apiKey.
   useEffect(() => {
     // Safety: Clear any global defaults that might have been set previously
     delete axios.defaults.headers.common['x-api-key'];
 
-    if (!apiKey) return;
+    if (!muapiApiKey) return;
 
     const interceptorId = axios.interceptors.request.use((config) => {
       // Check if URL is local/proxied
@@ -175,23 +236,23 @@ export default function StandaloneShell() {
       const isInternalProxy = config.url.includes('/api/app') || config.url.includes('/api/workflow') || config.url.includes('/api/agents') || config.url.includes('/api/api') || config.url.includes('/api/v1');
 
       if (isRelative || isInternalProxy) {
-        config.headers['x-api-key'] = apiKey;
+        config.headers['x-api-key'] = muapiApiKey;
       }
-      
+
       return config;
     });
 
     return () => {
       axios.interceptors.request.eject(interceptorId);
     };
-  }, [apiKey]);
+  }, [muapiApiKey]);
 
-  // Poll for balance every 30 seconds if key is present
+  // Poll for balance every 30 seconds if a Muapi key is present
   useEffect(() => {
-    if (!apiKey) return;
-    const interval = setInterval(() => fetchBalance(apiKey), 30000);
+    if (!muapiApiKey) return;
+    const interval = setInterval(() => fetchBalance(muapiApiKey), 30000);
     return () => clearInterval(interval);
-  }, [apiKey, fetchBalance]);
+  }, [muapiApiKey, fetchBalance]);
 
   // Drag and Drop Handlers
   const handleDragOver = useCallback((e) => {
@@ -236,8 +297,8 @@ export default function StandaloneShell() {
     </div>
   );
 
-  if (!apiKey) {
-    return <ApiKeyModal onSave={handleKeySave} />;
+  if (Object.keys(keys).length === 0) {
+    return <ApiKeyModal providers={PROVIDERS} onSave={handleKeySave} />;
   }
 
   return (
@@ -357,9 +418,13 @@ export default function StandaloneShell() {
       )}
 
       {/* Studio Content */}
+      {/* ImageStudio/VideoStudio are keyed by activeProviderId: switching provider
+          remounts them so their model catalog (see providers/catalog.js) and
+          selected-model state reset cleanly to the new provider's list instead
+          of holding a stale model id from the old provider. */}
       <div className="flex-1 min-h-0 relative overflow-hidden">
-        {activeTab === 'image'   && <ImageStudio   apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} />}
-        {activeTab === 'video'   && <VideoStudio   apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} />}
+        {activeTab === 'image'   && <ImageStudio   key={activeProviderId} apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} />}
+        {activeTab === 'video'   && <VideoStudio   key={activeProviderId} apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} />}
         {activeTab === 'clipping' && <ClippingStudio apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} />}
         {activeTab === 'vibe-motion' && <VibeMotionStudio apiKey={apiKey} />}
         {activeTab === 'lipsync' && <LipSyncStudio apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} />}
@@ -367,48 +432,96 @@ export default function StandaloneShell() {
         {activeTab === 'cinema'  && <CinemaStudio  apiKey={apiKey} />}
         {activeTab === 'audio'   && <AudioStudio   apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} />}
         {activeTab === 'marketing' && <MarketingStudio apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} />}
-        {activeTab === 'workflows' && <WorkflowStudio apiKey={apiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />}
-        {activeTab === 'agents' && <AgentStudio apiKey={apiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />}
-        {activeTab === 'design-agent' && <DesignAgentStudio apiKey={apiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />}
-        {activeTab === 'apps' && <AppsStudio apiKey={apiKey} />}
+        {/* Workflows/Agents/Design Agent/Apps are Muapi platform features — always
+            the Muapi key, never the active generation provider's key (see client.js). */}
+        {activeTab === 'workflows' && <WorkflowStudio apiKey={muapiApiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />}
+        {activeTab === 'agents' && <AgentStudio apiKey={muapiApiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />}
+        {activeTab === 'design-agent' && <DesignAgentStudio apiKey={muapiApiKey} isHeaderVisible={isHeaderVisible} onToggleHeader={setIsHeaderVisible} />}
+        {activeTab === 'apps' && <AppsStudio apiKey={muapiApiKey} />}
       </div>
 
-      {/* Settings Modal */}
+      {/* Settings Modal — one row per provider: switch active / add / change / remove key */}
       {showSettings && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in-up">
           <div className="bg-[#0a0a0a] border border-white/10 rounded-xl p-8 w-full max-w-sm shadow-2xl">
             <h2 className="text-white font-bold text-lg mb-2">Settings</h2>
-            <p className="text-white/40 text-[13px] mb-8">
-              Manage your AI studio preferences and authentication.
+            <p className="text-white/40 text-[13px] mb-6">
+              Manage your AI providers and authentication. The active provider is used by Image, Video, Audio, Lip Sync and the other generation studios.
             </p>
-            
-            <div className="space-y-4 mb-8">
-              <div className="bg-white/5 border border-white/[0.03] rounded-md p-4">
-                <label className="block text-xs font-bold text-white/30 mb-2">
-                   Active API Key
-                </label>
-                <div className="text-[13px] font-mono text-white/80">
-                  {apiKey.slice(0, 8)}••••••••••••••••
-                </div>
-              </div>
+
+            <div className="space-y-3 mb-8">
+              {PROVIDERS.map((p) => {
+                const hasKey = !!keys[p.id];
+                const isActive = p.id === activeProviderId;
+                return (
+                  <div
+                    key={p.id}
+                    className={`bg-white/5 border rounded-md p-4 transition-all ${isActive ? 'border-[#22d3ee]/40' : 'border-white/[0.03]'}`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-white/80">{p.label}</span>
+                        {isActive && (
+                          <span className="text-[9px] font-black text-[#22d3ee] bg-[#22d3ee]/10 px-1.5 py-0.5 rounded">ACTIVE</span>
+                        )}
+                      </div>
+                      {hasKey && !isActive && (
+                        <button
+                          onClick={() => handleProviderSwitch(p.id)}
+                          className="text-[10px] font-bold text-[#22d3ee] hover:text-[#e5ff33] transition-colors"
+                        >
+                          Use this
+                        </button>
+                      )}
+                    </div>
+                    <div className="text-[13px] font-mono text-white/60 mb-3">
+                      {hasKey ? `${keys[p.id].slice(0, 8)}••••••••••••••••` : 'No key set'}
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setKeyModalProvider(p.id)}
+                        className="flex-1 h-8 rounded-md bg-white/5 text-white/70 hover:bg-white/10 text-[11px] font-semibold transition-all border border-white/5"
+                      >
+                        {hasKey ? 'Change Key' : 'Add Key'}
+                      </button>
+                      {hasKey && (
+                        <button
+                          onClick={() => handleKeyRemove(p.id)}
+                          className="flex-1 h-8 rounded-md bg-red-500/10 text-red-400 hover:bg-red-500/20 text-[11px] font-semibold transition-all"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
-            <div className="flex gap-3">
-              <button
-                onClick={handleKeyChange}
-                className="flex-1 h-10 rounded-md bg-red-500/10 text-red-400 hover:bg-red-500/20 text-xs font-semibold transition-all"
-              >
-                Change Key
-              </button>
-              <button
-                onClick={() => setShowSettings(false)}
-                className="flex-1 h-10 rounded-md bg-white/5 text-white/80 hover:bg-white/10 text-xs font-semibold transition-all border border-white/5"
-              >
-                Close
-              </button>
-            </div>
+            <button
+              onClick={() => setShowSettings(false)}
+              className="w-full h-10 rounded-md bg-white/5 text-white/80 hover:bg-white/10 text-xs font-semibold transition-all border border-white/5"
+            >
+              Close
+            </button>
           </div>
         </div>
+      )}
+
+      {/* Scoped "add/change key" overlay for a single provider, opened from Settings */}
+      {keyModalProvider && (
+        <ApiKeyModal
+          overlay
+          providers={[getProviderConfig(keyModalProvider)]}
+          initialProviderId={keyModalProvider}
+          title={`${getProviderConfig(keyModalProvider).label} Key`}
+          subtitle={getProviderConfig(keyModalProvider).description}
+          onClose={() => setKeyModalProvider(null)}
+          onSave={(key, providerId) => {
+            handleKeySave(key, providerId);
+            setKeyModalProvider(null);
+          }}
+        />
       )}
     </div>
   );

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { runMotionGraphics, runMotionGraphicsEdit } from "../muapi.js";
+import { runMotionGraphics, runMotionGraphicsEdit } from "../client.js";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 async function downloadFile(url, filename) {

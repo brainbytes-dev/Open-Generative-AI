@@ -1,22 +1,9 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { generateVideo, generateI2V, processV2V, uploadFile } from "../muapi.js";
-import {
-  t2vModels,
-  i2vModels,
-  v2vModels,
-  getAspectRatiosForVideoModel,
-  getDurationsForModel,
-  getResolutionsForVideoModel,
-  getAspectRatiosForI2VModel,
-  getDurationsForI2VModel,
-  getResolutionsForI2VModel,
-  getEffectsForI2VModel,
-  getDefaultEffectForI2VModel,
-  getModesForModel,
-  getMaxImagesForI2VModel,
-} from "../models.js";
+import { generateVideo, generateI2V, processV2V, uploadFile } from "../client.js";
+import { getModelLists } from "../providers/catalog.js";
+import { getActiveProviderId } from "../providers/registry.js";
 
 // ── tiny helpers ──────────────────────────────────────────────────────────────
 
@@ -104,7 +91,7 @@ function DropdownItem({ label, selected, onClick }) {
   );
 }
 
-function ModelDropdown({ imageMode, selectedModel, onSelect, onClose }) {
+function ModelDropdown({ imageMode, selectedModel, onSelect, onClose, t2vModels, i2vModels, v2vModels }) {
   const [search, setSearch] = useState("");
 
   const generationModels = imageMode ? i2vModels : t2vModels;
@@ -242,6 +229,27 @@ export default function VideoStudio({
   onFilesHandled,
 }) {
   const PERSIST_KEY = "hg_video_studio_persistent";
+
+  // Provider-aware model catalog. StandaloneShell remounts this component
+  // (via `key={activeProvider}`) on provider switch. v2vModels is
+  // intentionally empty in the fal.ai catalog (v1 has no curated v2v
+  // entries) — handlers below check its length before switching into v2v
+  // mode so an empty catalog degrades gracefully instead of crashing.
+  const {
+    t2vModels,
+    i2vModels,
+    v2vModels,
+    getAspectRatiosForVideoModel,
+    getDurationsForModel,
+    getResolutionsForVideoModel,
+    getAspectRatiosForI2VModel,
+    getDurationsForI2VModel,
+    getResolutionsForI2VModel,
+    getEffectsForI2VModel,
+    getDefaultEffectForI2VModel,
+    getModesForModel,
+    getMaxImagesForI2VModel,
+  } = getModelLists(getActiveProviderId());
 
   // ── mode state ──
   const [imageMode, setImageMode] = useState(false); // i2v
@@ -596,6 +604,10 @@ export default function VideoStudio({
       alert("Video exceeds 50MB limit.");
       return;
     }
+    if (v2vModels.length === 0) {
+      alert("Video-to-video tools aren't available on the current provider yet. Switch to Muapi in Settings.");
+      return;
+    }
     setVideoUploading(true);
     setVideoProgress(0);
     try {
@@ -792,6 +804,10 @@ export default function VideoStudio({
     if (!file) return;
     if (file.size > 50 * 1024 * 1024) {
       alert("Video exceeds 50MB limit.");
+      return;
+    }
+    if (!isMotionControlSelection(selectedModel, v2vMode) && v2vModels.length === 0) {
+      alert("Video-to-video tools aren't available on the current provider yet. Switch to Muapi in Settings.");
       return;
     }
     setVideoUploading(true);
@@ -1649,6 +1665,9 @@ export default function VideoStudio({
                       selectedModel={selectedModel}
                       onSelect={handleModelSelect}
                       onClose={() => setOpenDropdown(null)}
+                      t2vModels={t2vModels}
+                      i2vModels={i2vModels}
+                      v2vModels={v2vModels}
                     />
                   </div>
                 )}

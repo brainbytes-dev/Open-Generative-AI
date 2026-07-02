@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { runClipping, uploadFile } from "../muapi.js";
+import { runClipping, uploadFile } from "../client.js";
 
 // ---------------------------------------------------------------------------
 // Inline SVG Icons
