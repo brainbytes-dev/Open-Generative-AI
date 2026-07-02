@@ -68,12 +68,17 @@ Muster wie fal). Kein Code dafür in diesem Durchgang.
 - [ ] Agent Studio (Muapi-gated, dokumentieren)
 - [ ] Design Agent / Apps / MCP-CLI Studio (Muapi-gated, dokumentieren)
 
-## P5 — Deploy auf Coolify
-- [ ] App in Coolify anlegen (Dockerfile Build-Pack, Port 3000)
-- [ ] Deploy-Key für privates/öffentliches Fork-Repo
-- [ ] Nice-Domain open-generative-ai.local.brainbyt.es (Coolify-UI)
-- [ ] NPM Proxy-Host
-- [ ] curl-Verifikation + Browser-Test (fal-Key, Generate)
+## P5 — Deploy auf Coolify — ZURÜCKGESTELLT (2026-07-02, Coolify-Queue kaputt)
+- [x] App in Coolify angelegt (uuid `zctyl2in9mo3nc1s6tzletnj`, Dockerfile Build-Pack, Port 3000, Public-Repo — kein Deploy-Key nötig)
+- [x] 3× Deploy getriggert — Docker-Build lief jedes Mal sauber durch (Next.js "Ready in 308ms" im Container-Log
+      bestätigt), aber der Container-Swap-Schritt ("Removing old containers") hängt danach permanent
+- [x] Diagnose: NICHT unser Code — auch `POST .../cancel` und `DELETE .../applications/...` hängen identisch.
+      Systemisches Problem mit Coolifys Queue-Worker (Horizon) auf diesem Host, nicht app-spezifisch.
+- [ ] Henrik checkt die Maschine direkt (Coolify-Dashboard, `docker ps`, Horizon-Worker-Container neustarten)
+- [ ] Danach: Deploy erneut triggern (`POST /deploy?uuid=zctyl2in9mo3nc1s6tzletnj&force=true`), Nice-Domain in
+      Coolify-UI setzen (`http://open-generative-ai.local.brainbyt.es:3000`), NPM Proxy-Host anlegen
+- Übergangsweise: `git clone --recurse-submodules` + `npm run setup && npm run build && npm start` lokal/auf
+  jeder anderen Docker-fähigen Maschine funktioniert nachweislich (mehrfach in dieser Session verifiziert)
 
 ## Später — Lokale GPU als Provider (Henrik-Idee 2026-07-02)
 Henrik hat lokal eine GPU. Web-App-Local-Inference gibt's im Upstream nicht (nur Electron-Desktop,
