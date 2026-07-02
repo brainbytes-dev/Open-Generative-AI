@@ -4,6 +4,8 @@ import { useState, useEffect, useRef, useCallback, useReducer } from "react";
 import { generateVideo, generateI2V, processV2V, uploadFile } from "../client.js";
 import { getModelLists } from "../providers/catalog.js";
 import { getActiveProviderId } from "../providers/registry.js";
+import { getPending } from "../providers/pending-tracker.js";
+import { resumePending } from "../providers/fal.js";
 
 // ── tiny helpers ──────────────────────────────────────────────────────────────
 
@@ -917,6 +919,33 @@ export default function VideoStudio({
     setCanvasUrl(url);
     setCanvasModel(model);
     setShowCanvas(true);
+  }, []);
+
+  // Re-attach to any generation that was still in-flight on fal.ai when this
+  // component last unmounted (tab switch, reload, provider switch). The
+  // request already cost money the moment it was submitted — this recovers
+  // the result instead of silently losing it. See providers/pending-tracker.js.
+  useEffect(() => {
+    if (getActiveProviderId() !== "fal" || !apiKey) return;
+    const pending = getPending("fal", "video");
+    pending.forEach((entry) => {
+      resumePending(entry, apiKey)
+        .then((res) => {
+          if (!res?.url) return;
+          const historyEntry = {
+            id: entry.requestId,
+            url: res.url,
+            prompt: entry.prompt || "",
+            model: entry.modelName || "",
+            timestamp: new Date(entry.startedAt).toISOString(),
+          };
+          addToLocalHistory(historyEntry);
+          showVideoInCanvas(res.url, entry.modelName);
+          onGenerationComplete?.({ url: res.url, model: entry.modelName, prompt: entry.prompt, type: "video" });
+        })
+        .catch((err) => console.error("[VideoStudio] Failed to resume pending generation:", err));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── generate ──────────────────────────────────────────────────────────────

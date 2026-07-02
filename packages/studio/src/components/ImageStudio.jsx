@@ -4,6 +4,8 @@ import { useState, useEffect, useRef, useCallback, useReducer } from "react";
 import { generateImage, generateI2I, uploadFile } from "../client.js";
 import { getModelLists } from "../providers/catalog.js";
 import { getActiveProviderId } from "../providers/registry.js";
+import { getPending } from "../providers/pending-tracker.js";
+import { resumePending } from "../providers/fal.js";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -1027,6 +1029,32 @@ export default function ImageStudio({
     },
     [historyItems],
   );
+
+  // Re-attach to any generation that was still in-flight on fal.ai when this
+  // component last unmounted (tab switch, reload, provider switch). The
+  // request already cost money the moment it was submitted — this recovers
+  // the result instead of silently losing it. See providers/pending-tracker.js.
+  useEffect(() => {
+    if (getActiveProviderId() !== "fal" || !apiKey) return;
+    const pending = getPending("fal", "image");
+    pending.forEach((entry) => {
+      resumePending(entry, apiKey)
+        .then((res) => {
+          if (!res?.url) return;
+          const historyEntry = {
+            id: entry.requestId,
+            url: res.url,
+            prompt: entry.prompt || "",
+            model: entry.modelName || "",
+            timestamp: new Date(entry.startedAt).toISOString(),
+          };
+          addToHistory(historyEntry);
+          onGenerationComplete?.({ url: res.url, model: entry.modelName, prompt: entry.prompt, type: "image" });
+        })
+        .catch((err) => console.error("[ImageStudio] Failed to resume pending generation:", err));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── View state ─────────────────────────────────────
 

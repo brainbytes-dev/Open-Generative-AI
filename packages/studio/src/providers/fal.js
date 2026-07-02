@@ -19,6 +19,7 @@
  */
 
 import { getModelById, getI2IModelById, getVideoModelById, getI2VModelById } from "./catalog.fal.js";
+import { trackPending, untrackPending } from "./pending-tracker.js";
 
 const BASE_URL =
   typeof window !== "undefined" && window.location?.protocol?.startsWith("http")
@@ -73,7 +74,13 @@ async function pollForResult(statusUrl, apiKey, maxAttempts = 900, interval = 20
   throw new Error("fal generation timed out after polling.");
 }
 
-async function submitAndPoll(falModelId, payload, apiKey, onRequestId, maxAttempts = 60) {
+function normalizeResult(result) {
+  const outputUrl =
+    result.images?.[0]?.url || result.video?.url || result.image?.url || result.audio?.url || result.video_url;
+  return { ...result, url: outputUrl };
+}
+
+async function submitAndPoll(falModelId, payload, apiKey, onRequestId, maxAttempts = 60, meta = {}) {
   if (!apiKey) throw new Error("No fal.ai API key set. Add one in Settings.");
   const res = await fetch(`${BASE_URL}/${falModelId}`, {
     method: "POST",
@@ -91,10 +98,26 @@ async function submitAndPoll(falModelId, payload, apiKey, onRequestId, maxAttemp
   const statusUrl = submitData.status_url
     ? proxyPathFromFalUrl(submitData.status_url)
     : `${BASE_URL}/${falModelId}/requests/${requestId}/status`;
-  const result = await pollForResult(statusUrl, apiKey, maxAttempts);
-  const outputUrl =
-    result.images?.[0]?.url || result.video?.url || result.image?.url || result.audio?.url || result.video_url;
-  return { ...result, url: outputUrl };
+  // Persist immediately — this request already costs money on fal's side the
+  // instant it was submitted, so a tab switch/reload from here on must not
+  // lose track of it (see pending-tracker.js).
+  trackPending(requestId, { ...meta, provider: "fal", statusUrl });
+  try {
+    const result = await pollForResult(statusUrl, apiKey, maxAttempts);
+    return normalizeResult(result);
+  } finally {
+    untrackPending(requestId);
+  }
+}
+
+/** Re-attaches to a request tracked before a reload/tab switch — no new submit, just resumes polling. */
+export async function resumePending(entry, apiKey) {
+  try {
+    const result = await pollForResult(entry.statusUrl, apiKey, 900);
+    return normalizeResult(result);
+  } finally {
+    untrackPending(entry.requestId);
+  }
 }
 
 function requireModel(modelInfo, id, kind) {
@@ -107,7 +130,11 @@ function requireModel(modelInfo, id, kind) {
 export async function generateImage(apiKey, params) {
   const modelInfo = requireModel(getModelById(params.model), params.model, "text-to-image");
   const payload = await modelInfo.buildPayload(params, apiKey);
-  return submitAndPoll(modelInfo.falId, payload, apiKey, params.onRequestId, 60);
+  return submitAndPoll(modelInfo.falId, payload, apiKey, params.onRequestId, 60, {
+    kind: "image",
+    modelName: modelInfo.name,
+    prompt: params.prompt,
+  });
 }
 
 export async function generateI2I(apiKey, params) {
@@ -116,13 +143,21 @@ export async function generateI2I(apiKey, params) {
     { ...params, image_url: params.image_url || params.images_list?.[0] },
     apiKey,
   );
-  return submitAndPoll(modelInfo.falId, payload, apiKey, params.onRequestId, 60);
+  return submitAndPoll(modelInfo.falId, payload, apiKey, params.onRequestId, 60, {
+    kind: "image",
+    modelName: modelInfo.name,
+    prompt: params.prompt,
+  });
 }
 
 export async function generateVideo(apiKey, params) {
   const modelInfo = requireModel(getVideoModelById(params.model), params.model, "text-to-video");
   const payload = await modelInfo.buildPayload(params, apiKey);
-  return submitAndPoll(modelInfo.falId, payload, apiKey, params.onRequestId, 900);
+  return submitAndPoll(modelInfo.falId, payload, apiKey, params.onRequestId, 900, {
+    kind: "video",
+    modelName: modelInfo.name,
+    prompt: params.prompt,
+  });
 }
 
 export async function generateI2V(apiKey, params) {
@@ -131,7 +166,11 @@ export async function generateI2V(apiKey, params) {
     { ...params, image_url: params.image_url || params.images_list?.[0] },
     apiKey,
   );
-  return submitAndPoll(modelInfo.falId, payload, apiKey, params.onRequestId, 900);
+  return submitAndPoll(modelInfo.falId, payload, apiKey, params.onRequestId, 900, {
+    kind: "video",
+    modelName: modelInfo.name,
+    prompt: params.prompt,
+  });
 }
 
 // fal.storage.upload() — see file header for why this uses the SDK, not raw fetch.
