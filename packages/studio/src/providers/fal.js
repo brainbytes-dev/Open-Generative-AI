@@ -80,7 +80,8 @@ async function submitAndPoll(falModelId, payload, apiKey, onRequestId, maxAttemp
   if (!requestId) return submitData;
   if (onRequestId) onRequestId(requestId);
   const result = await pollForResult(falModelId, requestId, apiKey, maxAttempts);
-  const outputUrl = result.images?.[0]?.url || result.video?.url || result.image?.url || result.audio?.url;
+  const outputUrl =
+    result.images?.[0]?.url || result.video?.url || result.image?.url || result.audio?.url || result.video_url;
   return { ...result, url: outputUrl };
 }
 
@@ -93,29 +94,31 @@ function requireModel(modelInfo, id, kind) {
 
 export async function generateImage(apiKey, params) {
   const modelInfo = requireModel(getModelById(params.model), params.model, "text-to-image");
-  return submitAndPoll(modelInfo.falId, modelInfo.buildPayload(params), apiKey, params.onRequestId, 60);
+  const payload = await modelInfo.buildPayload(params, apiKey);
+  return submitAndPoll(modelInfo.falId, payload, apiKey, params.onRequestId, 60);
 }
 
 export async function generateI2I(apiKey, params) {
   const modelInfo = requireModel(getI2IModelById(params.model), params.model, "image-to-image");
-  const payload = modelInfo.buildPayload({
-    ...params,
-    image_url: params.image_url || params.images_list?.[0],
-  });
+  const payload = await modelInfo.buildPayload(
+    { ...params, image_url: params.image_url || params.images_list?.[0] },
+    apiKey,
+  );
   return submitAndPoll(modelInfo.falId, payload, apiKey, params.onRequestId, 60);
 }
 
 export async function generateVideo(apiKey, params) {
   const modelInfo = requireModel(getVideoModelById(params.model), params.model, "text-to-video");
-  return submitAndPoll(modelInfo.falId, modelInfo.buildPayload(params), apiKey, params.onRequestId, 900);
+  const payload = await modelInfo.buildPayload(params, apiKey);
+  return submitAndPoll(modelInfo.falId, payload, apiKey, params.onRequestId, 900);
 }
 
 export async function generateI2V(apiKey, params) {
   const modelInfo = requireModel(getI2VModelById(params.model), params.model, "image-to-video");
-  const payload = modelInfo.buildPayload({
-    ...params,
-    image_url: params.image_url || params.images_list?.[0],
-  });
+  const payload = await modelInfo.buildPayload(
+    { ...params, image_url: params.image_url || params.images_list?.[0] },
+    apiKey,
+  );
   return submitAndPoll(modelInfo.falId, payload, apiKey, params.onRequestId, 900);
 }
 

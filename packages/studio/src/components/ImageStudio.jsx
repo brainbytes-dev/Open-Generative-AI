@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useReducer } from "react";
 import { generateImage, generateI2I, uploadFile } from "../client.js";
 import { getModelLists } from "../providers/catalog.js";
 import { getActiveProviderId } from "../providers/registry.js";
@@ -750,7 +750,21 @@ export default function ImageStudio({
     getEffectsForI2IModel,
     getDefaultEffectForI2IModel,
     getI2IModelById,
+    // Only present on the fal.ai bundle (catalog.fal.js) — undefined for
+    // Muapi, guarded with `?.()` below.
+    ensureFalCatalogLoaded,
+    subscribeFalCatalog,
   } = getModelLists(getActiveProviderId());
+
+  // Live-expand the model dropdown from the curated set to fal's full
+  // catalog (600+ models) once it's fetched. No-op for Muapi.
+  const [, forceCatalogRerender] = useReducer((x) => x + 1, 0);
+  useEffect(() => {
+    if (!ensureFalCatalogLoaded) return;
+    ensureFalCatalogLoaded(apiKey);
+    const unsubscribe = subscribeFalCatalog?.(forceCatalogRerender);
+    return unsubscribe;
+  }, [ensureFalCatalogLoaded, subscribeFalCatalog, apiKey]);
 
   // ── Model / mode state ──────────────────────────────────────────────────
   const [imageMode, setImageMode] = useState(false); // false=t2i, true=i2i

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useReducer } from "react";
 import { generateVideo, generateI2V, processV2V, uploadFile } from "../client.js";
 import { getModelLists } from "../providers/catalog.js";
 import { getActiveProviderId } from "../providers/registry.js";
@@ -249,7 +249,20 @@ export default function VideoStudio({
     getDefaultEffectForI2VModel,
     getModesForModel,
     getMaxImagesForI2VModel,
+    // Only present on the fal.ai bundle — undefined for Muapi.
+    ensureFalCatalogLoaded,
+    subscribeFalCatalog,
   } = getModelLists(getActiveProviderId());
+
+  // Live-expand the model dropdown from the curated set to fal's full
+  // catalog (600+ models) once it's fetched. No-op for Muapi.
+  const [, forceCatalogRerender] = useReducer((x) => x + 1, 0);
+  useEffect(() => {
+    if (!ensureFalCatalogLoaded) return;
+    ensureFalCatalogLoaded(apiKey);
+    const unsubscribe = subscribeFalCatalog?.(forceCatalogRerender);
+    return unsubscribe;
+  }, [ensureFalCatalogLoaded, subscribeFalCatalog, apiKey]);
 
   // ── mode state ──
   const [imageMode, setImageMode] = useState(false); // i2v
