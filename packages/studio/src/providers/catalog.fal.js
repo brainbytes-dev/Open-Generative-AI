@@ -304,6 +304,42 @@ const CURATED_I2V = [
       };
     },
   },
+  {
+    // ByteDance Seedance 2.0 Reference-to-Video — the best fit for our exact
+    // 9-angle identity library: up to 9 tagged reference images (@Image1..9)
+    // for maximum character-lock, native phoneme-level lip-synced audio
+    // (not post-processed), up to 4K, 9:16 native. Verified via schema:
+    // confirmed multi-image + generate_audio support, not marketing copy.
+    id: "fal-seedance-2-reference-to-video",
+    name: "Seedance 2.0 (Multi-Angle Reference, Native Audio)",
+    falId: "fal-ai/seedance-2/reference-to-video",
+    imageField: "images_list",
+    inputs: {
+      resolution: { enum: ["480p", "720p", "1080p", "4k"], default: "1080p" },
+      aspect_ratio: { enum: ["auto", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"], default: "9:16" },
+      duration: { enum: ["auto", "5", "8", "10", "12", "15"], default: "auto" },
+    },
+    buildPayload(params) {
+      const images =
+        Array.isArray(params.images_list) && params.images_list.length > 0
+          ? params.images_list
+          : params.image_url
+            ? [params.image_url]
+            : [];
+      const refTags = images.map((_, i) => `@Image${i + 1}`).join(", ");
+      const scene = params.text_input || params.prompt || "";
+      return {
+        image_urls: images,
+        prompt: refTags
+          ? `Using ${refTags} as reference images of the exact same person from different angles for maximum identity consistency. ${scene}`
+          : scene,
+        generate_audio: true,
+        resolution: params.resolution || "1080p",
+        aspect_ratio: params.aspect_ratio || "9:16",
+        duration: params.duration || "auto",
+      };
+    },
+  },
 ];
 
 // ─── Video-to-Video ─────────────────────────────────────────────────────────
