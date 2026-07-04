@@ -246,6 +246,64 @@ const CURATED_I2V = [
       };
     },
   },
+  {
+    // HeyGen — the commercial industry standard for realistic talking-avatar
+    // UGC video (not a generic indie fal app). Single call: image + script
+    // (params.prompt = the spoken line here, HeyGen's own convention) + a
+    // named professional voice produces speech + lip-synced video, up to
+    // 1080p, with native 9:16 for TikTok/Reels and built-in captions.
+    id: "fal-heygen-avatar4-i2v",
+    name: "HeyGen Avatar 4 (Talking, State-of-the-Art)",
+    falId: "fal-ai/heygen/avatar4/image-to-video",
+    imageField: "image_url",
+    inputs: {
+      resolution: { enum: ["360p", "480p", "540p", "720p", "1080p"], default: "1080p" },
+      aspect_ratio: { enum: ["16:9", "9:16", "4:5", "5:4", "1:1", "auto"], default: "9:16" },
+      voice: {
+        enum: [
+          "Warm Pro Narrator", "Chill Brian", "Ivy", "Monika Sogam", "Jenny", "Andrew",
+          "Jack Sterling - Broadcaster 🎙️", "Cute Chloe - Friendly 😊",
+          "Bold Blake", "Georgia", "Stella", "Expressive Evan", "Willow", "Baritone Ben",
+          "Professor Dean", "Nassim - Informative", "Chloe - Lifelike",
+        ],
+        default: "Jenny",
+      },
+    },
+    buildPayload(params) {
+      return {
+        image_url: params.image_url,
+        prompt: params.text_input || params.prompt || "",
+        voice: params.voice || "Jenny",
+        resolution: params.resolution || "1080p",
+        aspect_ratio: params.aspect_ratio || "9:16",
+        talking_style: params.talking_style || "expressive",
+        caption: params.caption !== undefined ? params.caption : true,
+      };
+    },
+  },
+  {
+    // Kling 3.0 Pro — cinematic motion + NATIVE audio generation (confirmed
+    // via schema: "generate_audio" boolean, EN/CN voice output), not a fake
+    // or bolted-on TTS pass. Different strength than HeyGen: more natural
+    // scene motion/acting vs. HeyGen's precise scripted-avatar delivery.
+    // Field name is start_image_url here, not image_url — Kling v3's own
+    // convention, mapped in buildPayload.
+    id: "fal-kling-v3-pro-i2v",
+    name: "Kling 3.0 Pro (Cinematic, Native Audio)",
+    falId: "fal-ai/kling-video/v3/pro/image-to-video",
+    imageField: "image_url",
+    inputs: {
+      duration: { enum: ["5", "8", "10", "12", "15"], default: "5" },
+    },
+    buildPayload(params) {
+      return {
+        start_image_url: params.image_url,
+        prompt: params.text_input || params.prompt || "",
+        generate_audio: true,
+        duration: params.duration || "5",
+      };
+    },
+  },
 ];
 
 // ─── Video-to-Video ─────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useReducer } from "react";
-import { generateI2I, uploadFile } from "../client.js";
+import { generateI2I, generateI2V, uploadFile } from "../client.js";
 import { getActiveProviderId } from "../providers/registry.js";
 import { getPending } from "../providers/pending-tracker.js";
 import { resumePending } from "../providers/fal.js";
@@ -70,6 +70,27 @@ const MODEL_OPTIONS = [
   { id: "fal-gpt-image-2-edit", name: "GPT Image 2 Edit" },
 ];
 
+// Two state-of-the-art options, different strengths — not a generic indie
+// fal app either way:
+// - HeyGen: commercial industry standard for precise scripted-avatar
+//   delivery (exact words, reliable lip-sync, built for marketing/UGC avatars).
+// - Kling 3.0 Pro: cinematic motion + confirmed NATIVE audio generation,
+//   more natural scene acting, less guaranteed on exact scripted wording.
+const VIDEO_MODEL_OPTIONS = [
+  { id: "fal-heygen-avatar4-i2v", name: "HeyGen Avatar 4 (precise scripted speech)" },
+  { id: "fal-kling-v3-pro-i2v", name: "Kling 3.0 Pro (cinematic motion + native audio)" },
+];
+
+const HEYGEN_VOICES = [
+  "Jenny", "Warm Pro Narrator", "Chill Brian", "Ivy", "Monika Sogam", "Andrew",
+  "Jack Sterling - Broadcaster 🎙️", "Cute Chloe - Friendly 😊", "Bold Blake",
+  "Georgia", "Stella", "Expressive Evan", "Willow", "Baritone Ben",
+  "Professor Dean", "Nassim - Informative", "Chloe - Lifelike",
+];
+
+const ASPECT_RATIOS = ["9:16", "16:9", "1:1", "4:5", "5:4"];
+const KLING_DURATIONS = ["5", "8", "10", "12", "15"];
+
 function buildAnglePrompt(preset, signatureNotes) {
   const signature = signatureNotes?.trim()
     ? ` Signature: keep ${signatureNotes.trim()} clearly visible.`
@@ -109,6 +130,16 @@ export default function CharacterShotsStudio({ apiKey }) {
   const [shots, setShots] = useState({});
   const fileInputRef = useRef(null);
 
+  // ── Step 2: bring a shot to life (talking / cinematic video) ───────────────
+  const [sourceForVideo, setSourceForVideo] = useState(null);
+  const [videoModel, setVideoModel] = useState(VIDEO_MODEL_OPTIONS[0].id);
+  const [script, setScript] = useState("");
+  const [voice, setVoice] = useState(HEYGEN_VOICES[0]);
+  const [aspectRatio, setAspectRatio] = useState("9:16");
+  const [klingDuration, setKlingDuration] = useState(KLING_DURATIONS[0]);
+  const [videoGenerating, setVideoGenerating] = useState(false);
+  const [videoResult, setVideoResult] = useState(null); // { status, url, error }
+
   const [, forceRerender] = useReducer((x) => x + 1, 0);
 
   const applyResult = useCallback((presetId, res) => {
@@ -133,6 +164,26 @@ export default function CharacterShotsStudio({ apiKey }) {
         .catch((err) => {
           console.error("[CharacterShotsStudio] Failed to resume pending shot:", err);
           if (presetId) setShots((prev) => ({ ...prev, [presetId]: { status: "error", error: err.message } }));
+        });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Same recovery mechanism for the talking-video step, scoped to its own
+  // "character-video" kind so it doesn't collide with the shots above or
+  // with Video Studio's own pending generations.
+  useEffect(() => {
+    if (getActiveProviderId() !== "fal" || !apiKey) return;
+    const pending = getPending("fal", "character-video");
+    pending.forEach((entry) => {
+      setVideoResult({ status: "loading" });
+      resumePending(entry, apiKey)
+        .then((res) => {
+          if (res?.url) setVideoResult({ status: "done", url: res.url });
+        })
+        .catch((err) => {
+          console.error("[CharacterShotsStudio] Failed to resume pending video:", err);
+          setVideoResult({ status: "error", error: err.message });
         });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -197,6 +248,39 @@ export default function CharacterShotsStudio({ apiKey }) {
 
     setGenerating(false);
   };
+
+  const handleGenerateVideo = async () => {
+    if (!sourceForVideo || !script.trim() || videoGenerating) return;
+    setVideoGenerating(true);
+    setVideoResult({ status: "loading" });
+    try {
+      const res = await generateI2V(apiKey, {
+        model: videoModel,
+        image_url: sourceForVideo,
+        text_input: script.trim(),
+        voice,
+        aspect_ratio: aspectRatio,
+        resolution: "1080p",
+        duration: klingDuration,
+        kind: "character-video",
+      });
+      if (res?.url) setVideoResult({ status: "done", url: res.url });
+      else throw new Error("No video URL returned by API");
+    } catch (err) {
+      setVideoResult({ status: "error", error: err.message });
+    } finally {
+      setVideoGenerating(false);
+    }
+  };
+
+  const availableSources = [
+    referenceUrl ? { id: "__reference__", url: referenceUrl, label: "Original" } : null,
+    ...ANGLE_PRESETS.filter((p) => shots[p.id]?.status === "done").map((p) => ({
+      id: p.id,
+      url: shots[p.id].url,
+      label: p.label,
+    })),
+  ].filter(Boolean);
 
   const allDone =
     ANGLE_PRESETS.length > 0 && ANGLE_PRESETS.every((p) => shots[p.id]?.status === "done");
@@ -316,6 +400,143 @@ export default function CharacterShotsStudio({ apiKey }) {
 
         {allDone && (
           <p className="text-center text-xs text-primary mt-4">All 9 shots generated.</p>
+        )}
+
+        {/* ── Step 2: Bring it to life (HeyGen talking avatar) ── */}
+        {availableSources.length > 0 && (
+          <div className="mt-10 pt-8 border-t border-white/10">
+            <h2 className="text-xl font-bold text-white mb-1">Step 2 — Bring It to Life</h2>
+            <p className="text-white/40 text-sm mb-6">
+              Pick a shot, write the script, generate a talking UGC video via HeyGen Avatar 4 — speech and lip-sync in one call, ready for TikTok/Reels.
+            </p>
+
+            <div className="bg-white/5 border border-white/[0.03] rounded-xl p-5 flex flex-col gap-4">
+              <div className="flex flex-wrap gap-3">
+                {availableSources.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setSourceForVideo(s.url)}
+                    className={`relative w-16 h-16 rounded-lg overflow-hidden border-2 transition-all ${
+                      sourceForVideo === s.url ? "border-primary" : "border-white/10 hover:border-white/30"
+                    }`}
+                    title={s.label}
+                  >
+                    <img src={s.url} alt={s.label} className="w-full h-full object-cover" />
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-bold text-white/40">Model</label>
+                <select
+                  value={videoModel}
+                  onChange={(e) => setVideoModel(e.target.value)}
+                  className="bg-white/5 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+                >
+                  {VIDEO_MODEL_OPTIONS.map((m) => (
+                    <option key={m.id} value={m.id} className="bg-[#0a0a0a]">
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-bold text-white/40">
+                  {videoModel === "fal-kling-v3-pro-i2v"
+                    ? "Scene / script (spoken line + action description)"
+                    : "Script (what the character says)"}
+                </label>
+                <textarea
+                  value={script}
+                  onChange={(e) => setScript(e.target.value)}
+                  placeholder="e.g. Hey! I've been using this for two weeks and honestly it changed my morning routine completely..."
+                  rows={3}
+                  className="bg-white/5 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-white/20 resize-none"
+                />
+              </div>
+
+              {videoModel === "fal-heygen-avatar4-i2v" ? (
+                <div className="flex flex-wrap gap-4">
+                  <div className="flex flex-col gap-2">
+                    <label className="text-xs font-bold text-white/40">Voice</label>
+                    <select
+                      value={voice}
+                      onChange={(e) => setVoice(e.target.value)}
+                      className="bg-white/5 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+                    >
+                      {HEYGEN_VOICES.map((v) => (
+                        <option key={v} value={v} className="bg-[#0a0a0a]">
+                          {v}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="text-xs font-bold text-white/40">Aspect Ratio</label>
+                    <select
+                      value={aspectRatio}
+                      onChange={(e) => setAspectRatio(e.target.value)}
+                      className="bg-white/5 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+                    >
+                      {ASPECT_RATIOS.map((ar) => (
+                        <option key={ar} value={ar} className="bg-[#0a0a0a]">
+                          {ar}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2 max-w-[160px]">
+                  <label className="text-xs font-bold text-white/40">Duration (seconds)</label>
+                  <select
+                    value={klingDuration}
+                    onChange={(e) => setKlingDuration(e.target.value)}
+                    className="bg-white/5 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+                  >
+                    {KLING_DURATIONS.map((d) => (
+                      <option key={d} value={d} className="bg-[#0a0a0a]">
+                        {d}s
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleGenerateVideo}
+                disabled={!sourceForVideo || !script.trim() || videoGenerating}
+                className="self-start bg-[#22d3ee] text-black px-5 py-2.5 rounded-md font-medium text-sm hover:bg-[#e5ff33] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {videoGenerating ? "Generating talking video…" : "Generate Talking Video"}
+              </button>
+
+              {videoResult?.status === "loading" && (
+                <div className="flex items-center gap-2 text-xs text-white/40">
+                  <div className="w-4 h-4 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
+                  HeyGen is generating — this can take a minute or two.
+                </div>
+              )}
+              {videoResult?.status === "error" && (
+                <p className="text-xs text-red-400">{videoResult.error}</p>
+              )}
+              {videoResult?.status === "done" && (
+                <div className="max-w-xs">
+                  <video src={videoResult.url} controls className="w-full rounded-lg border border-white/10" />
+                  <button
+                    type="button"
+                    onClick={() => downloadImage(videoResult.url, "character-talking-video.mp4")}
+                    className="mt-2 w-full text-center text-xs font-semibold text-primary hover:text-white transition-colors"
+                  >
+                    Download
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
         )}
       </div>
     </div>
